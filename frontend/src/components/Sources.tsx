@@ -41,44 +41,55 @@ interface RemoteRes<T> {
 
 type ImageSet = { id: number, key: number }[] // list of [image-id,key] (key is score,date,etc) - sorted by the key (descending)
 
-interface SearchAndResults {
-  search: string;
-  results: ImageSet;
-}
-
 function indexBy<T, S extends keyof T>(key: S, list: T[]) {
   return new Map(list.map((item) => [item[key], item]));
 }
 
-type History = {
-  searches: string[];
+type History<T> = {
+  past: T[];
   cur: number;
 }
-function history_create() {
+function history_create(): History<CompiledSearchQuery> {
   return {
-    searches: [''],
+    past: [{ query: '', normalized: [], hashKey: '' }],
     cur: 0
-  }
+  };
 };
-function history_current(h: History) {
-  return h.searches[h.cur];
-}
-function history_forward(h: History) {
+function history_push<T>(h: History<T>, s: T): History<T> {
   return {
-    searches: h.searches,
-    cur: Math.min(h.cur + 1, h.searches.length - 1)
+    past: [...h.past, s],
+    cur: h.past.length
   }
 }
-function history_back(h: History) {
+function history_deleteCur<T>(h: History<T>): History<T> {
+  if (h.past.length == 0) return h; // can't delete single entry
+  const copy = h.past.slice();
+  copy.splice(h.cur, 1);
+  const newCur = Math.min(copy.length - 1, h.cur);
   return {
-    searches: h.searches,
+    past: copy,
+    cur: newCur
+  }
+}
+function history_current<T>(h: History<T>): T {
+  return h.past[h.cur];
+}
+function history_forward<T>(h: History<T>): History<T> {
+  return {
+    past: h.past,
+    cur: Math.min(h.cur + 1, h.past.length - 1)
+  }
+}
+function history_back<T>(h: History<T>): History<T> {
+  return {
+    past: h.past,
     cur: Math.max(h.cur - 1, 0)
   }
 }
-function history_hasNext(h: History) {
-  return h.cur < h.searches.length - 1;
+function history_hasNext<T>(h: History<T>): boolean {
+  return h.cur < h.past.length - 1;
 }
-function history_hasPrev(h: History) {
+function history_hasPrev<T>(h: History<T>): boolean {
   return h.cur > 0;
 }
 
@@ -123,72 +134,71 @@ export const Head: React.FC = () => {
 const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
   const [search, setSearch] = useState('');
   const debounced = useDebounce(search);
-  const [history, setHistory] = useState<SearchAndResults[]>(() => [{ search: '', results: images.map(({ id }) => ({ id, key: 0 })) }]);
-  const [historyIndex, setHistoryIndex] = useState<number>(-1); // -1 means we're not showing history view
+
+  const [history, setHistory] = useState<History<CompiledSearchQuery>>(history_create)
+
+  const searcher = useMemo(() => createSearcher(images), [images]);
 
   useEffect(() => {
     if (debounced) {
-      const matcher = compileSearchTerm(debounced);
-      const results: ImageSet = images.map((image) => ({ id: image.id, key: matcher(image) }));
-      results.sort((a, b) => b.key - a.key); // sort by confidence score - descending
-      const mostRelevant: ImageSet = []
-      for (const result of results) {
-        if (result.key < 0.5) break;
-        mostRelevant.push(result);
-      }
-      //todo: never push the same query
-      setHistory((prev) => [...prev, { search: debounced, results: mostRelevant }]);
-      setHistoryIndex(history.length);
+      const query = prepareSearchQuery(debounced);
+      setHistory((h) => {
+        if (history_current(h).query != debounced && h.past.at(-1)!.hashKey != query.hashKey) {
+          return history_push(h, query);
+        };
+        return h
+      });
     }
-  }, [debounced, images]);
-
-  // prepare a function to extract images
-  const extractResultsCached = useMemo(() => extractImageSet(images), [images])
+  }, [debounced, searcher]);
 
   function onBack() {
-    if (historyIndex == -1) {
-      if (history.length > 0)
-        setHistoryIndex(history.length - 1);
-    } else {
-      setHistoryIndex(Math.max(0, historyIndex - 1));
-    }
+    setHistory((h) => {
+      const prev = history_back(h);
+      setSearch(history_current(prev).query);
+      return prev;
+    });
   }
 
   function onNext() {
-    if (historyIndex == -1) {
-      // pass
-    } else {
-      setHistoryIndex(Math.min(history.length - 1, historyIndex + 1));
-    }
+    setHistory((h) => {
+      const next = history_forward(h);
+      setSearch(history_current(next).query);
+      return next;
+    });
   }
 
-  let searchQueryToShow = '', itemsToShow = null;
-  if (historyIndex != -1) {
-    const { results, search } = history[historyIndex];
-    searchQueryToShow = search;
-    itemsToShow = extractResultsCached(results);
-  } else {
-    searchQueryToShow = search;
-    itemsToShow = images;
+  function onDeleteCur() {
+    setHistory((h) => {
+      const h2 = history_deleteCur(h);
+      setSearch(history_current(h2).query);
+      return h2
+    });
   }
+
+  //todo: this runs on every keypress in the search field. really bad
+  let itemsToShow = extractImageSet(images)(searcher(history_current(history)));
 
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">NASA Space Images</h1>
 
       <div className="flex items-center max-w-sm mx-auto">
-        <SearchField search={searchQueryToShow} setSearch={(value) => { setSearch(value); setHistoryIndex(-1); }} />
+        <SearchField search={search} setSearch={(value) => setSearch(value)} />
       </div>
 
       Search History:
       <div className="inline-flex rounded-md shadow-sm" role="group">
-        <button type="button" disabled={historyIndex == 0 || history.length == 0} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+        <button type="button" disabled={!history_hasPrev(history)} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={onBack}>
           <img width="24px" height="24px" src="left-arrow-back-svgrepo-com.svg" alt='back' />
         </button>
-        <button type="button" disabled={historyIndex == -1 || historyIndex == history.length - 1} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+        <button type="button" disabled={!history_hasNext(history)} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={onNext}>
           <img width="24px" height="24px" src="right-arrow-next-svgrepo-com.svg" alt='next' />
+        </button>
+        <button type="button" disabled={debounced == search && history_current(history)?.hashKey == ''} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={onDeleteCur}>
+          <img width="24px" height="24px" src="red-x-10333.svg" alt='delete' />
         </button>
       </div>
 
@@ -200,17 +210,70 @@ const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
 };
 
 
+// preparing a search query for use:
+// split to words (remove empty entries)
+// remove stop-words of english (google it)
+// remove duplicates
+//
+// match algorithm: number of keywords in image.description / total number of keywords
+// cache results: cache key is words,sorted,joined with "-"
 
-const compileSearchTerm = (term: string) => {
-  const words = term.toLowerCase().split(/\W/).filter(Boolean); // split on anything that isn't word, filter out empties
-  // remove common words (google stop-words)
-  const interestingWords = words.filter((word) => !stopWords.has(word));
-  // remove duplicates -> hashkey (sort+join)
-  // return a function that will match image's description to the search query
-  return (image: Source): number => {
-    return interestingWords.some((word) => image.description.includes(word)) ? 0.9 : 0;
-  }
+interface CompiledSearchQuery {
+  query: string;
+  normalized: string[];
+  hashKey: string;
 }
+function prepareSearchQuery(query: string): CompiledSearchQuery {
+  const words = query.toLowerCase().split(/\W/).filter(Boolean);
+  const interestingWords = words.filter((word) => !stopWords.has(word));
+  const normalized = [...new Set(interestingWords)].sort()
+  const hashKey = normalized.join("-");
+  return { query, normalized, hashKey };
+}
+const prop = (key: string) => (obj: any) => obj[key];
+
+function memoizeByKey<R, K>(keyGenerator: (...args: any[]) => K, fn: (...args: any[]) => R) {
+  const cache = new Map<K, R>();
+
+  return function (...args: any[]) {
+    const key = keyGenerator(...args);
+
+    if (cache.has(key)) {
+      return cache.get(key)!;
+    }
+    const result = fn.apply(null, args); // Execute the original function if not cached
+    cache.set(key, result); // Store the result in the cache
+    return result;
+  };
+}
+
+
+function countWords(text: string, searchWords: string[]) {
+  const wordsInText = new Set(text.toLowerCase().split(/\W/));
+  return searchWords.reduce((sum, curWord) => sum + (wordsInText.has(curWord) ? 1 : 0), 0);
+}
+
+function takeWhile<T>(list: T[], check: (t: T) => boolean) {
+  let result: T[] = [];
+  for (const item of list) {
+    if (check(item) === false)
+      break;
+    result.push(item)
+  }
+  return result;
+}
+
+const createSearcher = (images: Source[]) =>
+  memoizeByKey(prop('hashKey'),
+    (({ normalized }) => {
+      const numWords = normalized.length;
+      if (numWords == 0) {
+        return images.map((image) => ({ id: image.id, key: 1 }));
+      }
+      let results = images.map((image) => ({ id: image.id, key: countWords(image.description, normalized) / numWords }));
+      results.sort((a, b) => b.key - a.key); //sort descending
+      return takeWhile(results, ({ key }) => key > 0);//take only results with positive score  
+    }));
 
 function memoizeByObject<T extends object, R>(fn: (arg: T) => R) {
   let cache = new WeakMap<T, R>();
