@@ -1,8 +1,28 @@
-import React, { FormEvent, useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useDebounce } from '../hooks/use-debounce';
+import { SearchField } from './search-field';
+import { ImageCard } from './image-card';
+import { stopWords } from '../utils/stop-words';
 
-interface Source {
+
+// history:
+// history should save the entire query the user typed.
+// to use it: clean up (lowercase, remove stop-words) -> cache key is the words sorted and joined
+// to calc matches I take a list of clean words, match them with description of image
+// that is memoized - that way if users types the same query twice, results are there already.
+// when typing a new query, move future to past and insert to future (only if it's different that latest)
+// even if user changes a single letter I insert into the history
+//
+// navigating the history
+//
+// deleting from history
+
+// check History API of the browser.
+
+
+
+export interface Source {
   id: number;
   name: string;
   description: string;
@@ -12,40 +32,65 @@ interface Source {
   status: string;
 }
 
-//todo: if this was [id,T][] where T is any comparable, I could have results sorted
-// by score, creation-date, or anything else
-type SearchResults = Array<{ id: number; score: number }>;
-type SearchTermWithResults = {
-  searchTerm: string;
-  results: SearchResults;
-};
 
-interface AppState {
-  searchTerm?: string;
-  sources: Source[];
-  history: SearchTermWithResults[];
-}
-
-interface DataState {
+// response of fetch of remote resource
+interface RemoteRes<T> {
+  data?: T;
   error?: string;
-  images?: Source[];
 }
-const Sources: React.FC = () => {
-  const [data, setData] = useState<DataState>({});
-  // const [appstate, setAppstate] = useState<AppState>({});
-  const [search, setSearch] = useState('');
-  const debounced = useDebounce(search);
-  const [searchResults, setSearchResults] = useState<SearchResults | undefined>();
-  const stableSearchResults = useDebounce(searchResults, 1500);
-  const [history, setHistory] = useState<SearchTermWithResults[]>([]);
-  const [index, setIndex] = useState(-1);
+
+type ImageSet = { id: number, key: number }[] // list of [image-id,key] (key is score,date,etc) - sorted by the key (descending)
+
+interface SearchAndResults {
+  search: string;
+  results: ImageSet;
+}
+
+function indexBy<T, S extends keyof T>(key: S, list: T[]) {
+  return new Map(list.map((item) => [item[key], item]));
+}
+
+type History = {
+  searches: string[];
+  cur: number;
+}
+function history_create() {
+  return {
+    searches: [''],
+    cur: 0
+  }
+};
+function history_current(h: History) {
+  return h.searches[h.cur];
+}
+function history_forward(h: History) {
+  return {
+    searches: h.searches,
+    cur: Math.min(h.cur + 1, h.searches.length - 1)
+  }
+}
+function history_back(h: History) {
+  return {
+    searches: h.searches,
+    cur: Math.max(h.cur - 1, 0)
+  }
+}
+function history_hasNext(h: History) {
+  return h.cur < h.searches.length - 1;
+}
+function history_hasPrev(h: History) {
+  return h.cur > 0;
+}
+
+// The role of this component is to fetch data from server, show error/loading/data-display
+export const Head: React.FC = () => {
+  const [data, setData] = useState<RemoteRes<Source[]>>();
+
   useEffect(() => {
     const fetchImages = async () => {
       try {
-        const response = await axios.get('/api/sources');
-        setData({
-          images: response.data
-        })
+        const { data } = await axios.get('/api/sources');
+        setData({ data })
       } catch (err) {
         setData({
           error: 'Failed to fetch space images'
@@ -56,143 +101,139 @@ const Sources: React.FC = () => {
     fetchImages();
   }, []);
 
+  if (!data) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  } else if (data.error) {
+    return (
+      <div className="text-red-500 text-center p-4">
+        {data.error}
+      </div>
+    );
+  } else if (data.data) {
+    return <Sources images={data.data} />;
+  }
+  return null;
+}
+
+// Main images display + search bar
+const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
+  const [search, setSearch] = useState('');
+  const debounced = useDebounce(search);
+  const [history, setHistory] = useState<SearchAndResults[]>(() => [{ search: '', results: images.map(({ id }) => ({ id, key: 0 })) }]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1); // -1 means we're not showing history view
+
   useEffect(() => {
-    if (data.images && debounced) {
+    if (debounced) {
       const matcher = compileSearchTerm(debounced);
-      //todo this should be an async operation since it can take awhile
-      const results: SearchResults = data.images.map((image) => ({ id: image.id, score: matcher(image) })).filter(({ id, score }) => score > 0.75)
-      results.sort((a, b) => a.score - b.score);
-      setSearchResults(results);
-      setIndex(-1);
-      const timer = setTimeout(() => setHistory((prev) => [...prev, { searchTerm: debounced, results }]), 1500)
-      return () => clearTimeout(timer);
+      const results: ImageSet = images.map((image) => ({ id: image.id, key: matcher(image) }));
+      results.sort((a, b) => b.key - a.key); // sort by confidence score - descending
+      const mostRelevant: ImageSet = []
+      for (const result of results) {
+        if (result.key < 0.5) break;
+        mostRelevant.push(result);
+      }
+      //todo: never push the same query
+      setHistory((prev) => [...prev, { search: debounced, results: mostRelevant }]);
+      setHistoryIndex(history.length);
     }
-  }, [debounced, data.images]);
+  }, [debounced, images]);
 
-  const { images, error } = data;
-
-  if (error) {
-    return <div className="text-red-500 text-center p-4">{data.error}</div>;
-  }
-
-  if (!images) {
-    return <div className="flex justify-center items-center min-h-screen">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-    </div>;
-  }
-
-
-  let resultSet = index != -1 ? history[index].results : searchResults;
-  const itemsToShow = (resultSet ? gatherSearchResults(resultSet, images) : images);
-
-  function dosearch(e: FormEvent<HTMLFormElement>) {
-    e.stopPropagation();
-    e.preventDefault();
-    const searchTerm = e.currentTarget["simple-search"].value;
-    setSearch(searchTerm);
-  }
-
+  // prepare a function to extract images
+  const extractResultsCached = useMemo(() => extractImageSet(images), [images])
 
   function onBack() {
-    if (index > 0)
-      setIndex(index - 1);
-    else
-      setIndex(history.length - 1);
+    if (historyIndex == -1) {
+      if (history.length > 0)
+        setHistoryIndex(history.length - 1);
+    } else {
+      setHistoryIndex(Math.max(0, historyIndex - 1));
+    }
   }
 
   function onNext() {
-    if (index >= 0 && index < history.length)
-      setIndex(index + 1);
+    if (historyIndex == -1) {
+      // pass
+    } else {
+      setHistoryIndex(Math.min(history.length - 1, historyIndex + 1));
+    }
+  }
+
+  let searchQueryToShow = '', itemsToShow = null;
+  if (historyIndex != -1) {
+    const { results, search } = history[historyIndex];
+    searchQueryToShow = search;
+    itemsToShow = extractResultsCached(results);
+  } else {
+    searchQueryToShow = search;
+    itemsToShow = images;
   }
 
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-8">NASA Space Images</h1>
 
-      <form className="flex items-center max-w-sm mx-auto" onSubmit={dosearch}>
-        <label htmlFor="simple-search" className="sr-only">Search</label>
-        <div className="relative w-full">
-          <div className="absolute inset-y-0 start-0 flex items-center ps-3 pointer-events-none">
-            <svg className="w-4 h-4" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 20 20">
-              <path stroke="lightgrey" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 19-4-4m0-7A7 7 0 1 1 1 8a7 7 0 0 1 14 0Z" />
-            </svg>
-          </div>
-          <input type="search" id="simple-search"
-            value={search} onChange={(e) => setSearch(e.currentTarget.value)}
-            placeholder="Type to search"
-            className="bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full ps-10 p-2.5  dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white dark:focus:ring-blue-500 dark:focus:border-blue-500 outline-none" />
-        </div>
-        <button type="submit" className="p-2.5 ms-2 text-sm font-medium text-white bg-blue-700 rounded-lg border border-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800">
-          Search
-        </button>
-      </form>
-      Browse history
+      <div className="flex items-center max-w-sm mx-auto">
+        <SearchField search={searchQueryToShow} setSearch={(value) => { setSearch(value); setHistoryIndex(-1); }} />
+      </div>
+
+      Search History:
       <div className="inline-flex rounded-md shadow-sm" role="group">
-        <button type="button" className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white"
+        <button type="button" disabled={historyIndex == 0 || history.length == 0} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={onBack}>
           <img width="24px" height="24px" src="left-arrow-back-svgrepo-com.svg" alt='back' />
         </button>
-        <button type="button" className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white"
+        <button type="button" disabled={historyIndex == -1 || historyIndex == history.length - 1} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={onNext}>
           <img width="24px" height="24px" src="right-arrow-next-svgrepo-com.svg" alt='next' />
         </button>
-
       </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {itemsToShow.map((image) => image && <ImageCard image={image} />)}
+        {itemsToShow.map((image) => image && <ImageCard key={image.id} image={image} />)}
       </div>
     </div>
   );
 };
 
-const ImageCard: React.FC<{ image: Source }> = ({ image }) =>
-  <div key={image.id} className="bg-white rounded-lg shadow-lg overflow-hidden">
-    {image.image_url && (
-      <img
-        src={image.image_url}
-        alt={image.name}
-        className="w-full h-48 object-cover"
-      />
-    )}
-    <div className="p-4">
-      <h2 className="text-xl font-semibold mb-2">{image.name}</h2>
-      <p className="text-gray-600 mb-2 line-clamp-3">{image.description}</p>
-      <p className="text-sm text-gray-500 mb-4">
-        {image.launch_date && new Date(image.launch_date).toLocaleDateString()}
-      </p>
-      {image.image_url && (
-        <a
-          href={image.image_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-block bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition-colors"
-        >
-          View Full Image
-        </a>
-      )}
-    </div>
-  </div>;
 
 
 const compileSearchTerm = (term: string) => {
-  // can normalize search term (lowercase, split to words), find most relevant words, etc.
+  const words = term.toLowerCase().split(/\W/).filter(Boolean); // split on anything that isn't word, filter out empties
+  // remove common words (google stop-words)
+  const interestingWords = words.filter((word) => !stopWords.has(word));
+  // remove duplicates -> hashkey (sort+join)
+  // return a function that will match image's description to the search query
   return (image: Source): number => {
-    return Math.random();//todo
+    return interestingWords.some((word) => image.description.includes(word)) ? 0.9 : 0;
   }
 }
 
-// can memoize this function by results (assuming images is the more constant)
-const gatherSearchResults = (results: SearchResults, images: Source[]) => {
-  const imagesMap = new Map(images.map((image) => [image.id, image])) // can also be done once outside ! and used to fetch images by sort order
-  return results.map(({ id }) => imagesMap.get(id));
+function memoizeByObject<T extends object, R>(fn: (arg: T) => R) {
+  let cache = new WeakMap<T, R>();
+  return (arg: T): R => {
+    if (cache.has(arg))
+      return cache.get(arg)!;
+    const value = fn(arg)
+    cache.set(arg, value)
+    return value;
+  }
 }
 
-export default Sources;
-// items + search-term + results -> debounce and insert into history /
-
-
-// app state:
-// items (raw list + indexes) / error
-// past: list of searchterm, result-index
-// future: same type as past
-// cur-search
+// this function takes images, and returns a (memoized) function to extract set of images by id.
+// this way we can extract some images, and it's memoized so we can get it again immediately
+const extractImageSet = (images: Source[]) => {
+  const indexById = indexBy('id' as const, images);
+  return memoizeByObject((results: ImageSet) => {
+    return results.reduce((acc, cur) => {
+      const image = indexById.get(cur.id);
+      if (image) {
+        acc.push(image);
+      }
+      return acc;
+    }, [] as Source[])
+  });
+}
