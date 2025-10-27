@@ -3,7 +3,8 @@ import axios from 'axios';
 import { useDebounce } from '../hooks/use-debounce';
 import { SearchField } from './search-field';
 import { ImageCard } from './image-card';
-import { stopWords } from '../utils/stop-words';
+import { indexBy, memoizeByKey, prop, takeWhile } from '../utils/stdlib';
+import { CompiledSearchQuery, countWords, prepareSearchQuery } from '../utils/text-handling';
 
 
 // history:
@@ -40,10 +41,6 @@ interface RemoteRes<T> {
 }
 
 type ImageSet = { id: number, key: number }[] // list of [image-id,key] (key is score,date,etc) - sorted by the key (descending)
-
-function indexBy<T, S extends keyof T>(key: S, list: T[]) {
-  return new Map(list.map((item) => [item[key], item]));
-}
 
 type History<T> = {
   past: T[];
@@ -94,7 +91,7 @@ function history_hasPrev<T>(h: History<T>): boolean {
 }
 
 // The role of this component is to fetch data from server, show error/loading/data-display
-export const Head: React.FC = () => {
+export const DataLoader: React.FC = () => {
   const [data, setData] = useState<RemoteRes<Source[]>>();
 
   useEffect(() => {
@@ -175,8 +172,10 @@ const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
     });
   }
 
-  //todo: this runs on every keypress in the search field. really bad
-  let itemsToShow = extractImageSet(images)(searcher(history_current(history)));
+  //todo: can be simpler
+  const extractor = useMemo(() => extractImageSet(images), [images])
+  let itemsToShow = extractor(searcher(history_current(history)));
+
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -218,50 +217,6 @@ const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
 // match algorithm: number of keywords in image.description / total number of keywords
 // cache results: cache key is words,sorted,joined with "-"
 
-interface CompiledSearchQuery {
-  query: string;
-  normalized: string[];
-  hashKey: string;
-}
-function prepareSearchQuery(query: string): CompiledSearchQuery {
-  const words = query.toLowerCase().split(/\W/).filter(Boolean);
-  const interestingWords = words.filter((word) => !stopWords.has(word));
-  const normalized = [...new Set(interestingWords)].sort()
-  const hashKey = normalized.join("-");
-  return { query, normalized, hashKey };
-}
-const prop = (key: string) => (obj: any) => obj[key];
-
-function memoizeByKey<R, K>(keyGenerator: (...args: any[]) => K, fn: (...args: any[]) => R) {
-  const cache = new Map<K, R>();
-
-  return function (...args: any[]) {
-    const key = keyGenerator(...args);
-
-    if (cache.has(key)) {
-      return cache.get(key)!;
-    }
-    const result = fn.apply(null, args); // Execute the original function if not cached
-    cache.set(key, result); // Store the result in the cache
-    return result;
-  };
-}
-
-
-function countWords(text: string, searchWords: string[]) {
-  const wordsInText = new Set(text.toLowerCase().split(/\W/));
-  return searchWords.reduce((sum, curWord) => sum + (wordsInText.has(curWord) ? 1 : 0), 0);
-}
-
-function takeWhile<T>(list: T[], check: (t: T) => boolean) {
-  let result: T[] = [];
-  for (const item of list) {
-    if (check(item) === false)
-      break;
-    result.push(item)
-  }
-  return result;
-}
 
 const createSearcher = (images: Source[]) =>
   memoizeByKey(prop('hashKey'),
@@ -276,7 +231,7 @@ const createSearcher = (images: Source[]) =>
     }));
 
 function memoizeByObject<T extends object, R>(fn: (arg: T) => R) {
-  let cache = new WeakMap<T, R>();
+  let cache = new Map<T, R>();
   return (arg: T): R => {
     if (cache.has(arg))
       return cache.get(arg)!;
