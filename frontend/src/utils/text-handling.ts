@@ -11,7 +11,9 @@ function internal_prepareSearchQuery(query: string): CompiledSearchQuery {
   const words = query.toLowerCase().split(/\W/).filter((word) =>
     !!word && !stopWords.has(word)
   );
-  const normalized = [...new Set(words)].sort();
+  let normalized: string[] = [];
+  new Set(words).forEach((word) => normalized.push(word));
+  normalized.sort();
   const hashKey = normalized.join("-");
   return { query, normalized, hashKey };
 }

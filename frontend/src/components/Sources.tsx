@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useDebounce } from '../hooks/use-debounce';
 import { SearchField } from './search-field';
@@ -6,22 +6,6 @@ import { ImageCard } from './image-card';
 import { indexBy, memoizeByKey, prop, takeWhile } from '../utils/stdlib';
 import { CompiledSearchQuery, countWords, prepareSearchQuery } from '../utils/text-handling';
 import { useHistory } from '../hooks/use-history';
-
-
-// history:
-// history should save the entire query the user typed.
-// to use it: clean up (lowercase, remove stop-words) -> cache key is the words sorted and joined
-// to calc matches I take a list of clean words, match them with description of image
-// that is memoized - that way if users types the same query twice, results are there already.
-// when typing a new query, move future to past and insert to future (only if it's different that latest)
-// even if user changes a single letter I insert into the history
-//
-// navigating the history
-//
-// deleting from history
-
-// check History API of the browser.
-
 
 
 export interface Source {
@@ -84,39 +68,31 @@ export const DataLoader: React.FC = () => {
 const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
   const [search, setSearch] = useState('');
   const debounced = useDebounce(search);
-
   const history = useHistory<CompiledSearchQuery>({ query: '', normalized: [], hashKey: '' });
-
   const searcher = useMemo(() => createSearcher(images), [images]);
+  const extractor = useMemo(() => extractImageSet(images), [images]); // this is clunky, can probably be simpler
+
+  const ref = useRef<any>(null);
+  ref.current = (debounced: string) => {
+    const query = prepareSearchQuery(debounced);
+    if (history.value.query != debounced && history.latest.hashKey != query.hashKey) {
+      history.push(query);
+    }
+  };
 
   useEffect(() => {
     if (debounced) {
-      const query = prepareSearchQuery(debounced);
-      if (history.value.query != debounced && history.latest.hashKey != query.hashKey) {
-        history.push(query);
-      }
+      ref.current(debounced);
     }
-  }, [debounced, history]);
+  }, [debounced]);
 
-  function updateSearchWithHistoryItem(h: CompiledSearchQuery) {
-    setSearch(h.query);
-  }
-  function onBack() {
-    history.back(updateSearchWithHistoryItem);
-  }
 
-  function onNext() {
-    history.forward(updateSearchWithHistoryItem);
-  }
+  // when history.value changes, the search field should reflect it
+  useEffect(() => {
+    setSearch(history.value.query);
+  }, [history.value])
 
-  function onDeleteCur() {
-    history.deleteCur(updateSearchWithHistoryItem);
-  }
-
-  //todo: can be simpler
-  const extractor = useMemo(() => extractImageSet(images), [images])
-  let itemsToShow = extractor(searcher(history.value));
-
+  const itemsToShow = debounced ? extractor(searcher(history.value)) : images;
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -129,15 +105,15 @@ const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
       Search History:
       <div className="inline-flex rounded-md shadow-sm" role="group">
         <button type="button" disabled={!history.hasPrev} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={onBack}>
+          onClick={history.back}>
           <img width="24px" height="24px" src="left-arrow-back-svgrepo-com.svg" alt='back' />
         </button>
         <button type="button" disabled={!history.hasNext} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={onNext}>
+          onClick={history.forward}>
           <img width="24px" height="24px" src="right-arrow-next-svgrepo-com.svg" alt='next' />
         </button>
-        <button type="button" disabled={debounced == search && history.value.hashKey != ''} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={onDeleteCur}>
+        <button type="button" disabled={history.value.hashKey == ''} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={history.deleteCur}>
           <img width="24px" height="24px" src="red-x-10333.svg" alt='delete' />
         </button>
       </div>
@@ -149,26 +125,19 @@ const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
   );
 };
 
-
-// preparing a search query for use:
-// split to words (remove empty entries)
-// remove stop-words of english (google it)
-// remove duplicates
-//
-// match algorithm: number of keywords in image.description / total number of keywords
-// cache results: cache key is words,sorted,joined with "-"
-
-
+// Prepares a search function over the images dataset
+// the search function takes CompiledSearchQuery, returns ImageSet
 const createSearcher = (images: Source[]) =>
   memoizeByKey(prop('hashKey'),
-    (({ normalized }) => {
+    (({ normalized }: CompiledSearchQuery) => {
       const numWords = normalized.length;
       if (numWords == 0) {
         return images.map((image) => ({ id: image.id, key: 1 }));
       }
       let results = images.map((image) => ({ id: image.id, key: countWords(image.description, normalized) / numWords }));
       results.sort((a, b) => b.key - a.key); //sort descending
-      return takeWhile(results, ({ key }) => key > 0);//take only results with positive score  
+      return takeWhile(results, ({ key }) => key == 1); //take only results that include all words
+      // can also take images that include any search work, with key>0
     }));
 
 function memoizeByObject<T extends object, R>(fn: (arg: T) => R) {
