@@ -5,6 +5,7 @@ import { SearchField } from './search-field';
 import { ImageCard } from './image-card';
 import { indexBy, memoizeByKey, prop, takeWhile } from '../utils/stdlib';
 import { CompiledSearchQuery, countWords, prepareSearchQuery } from '../utils/text-handling';
+import { useHistory } from '../hooks/use-history';
 
 
 // history:
@@ -41,54 +42,6 @@ interface RemoteRes<T> {
 }
 
 type ImageSet = { id: number, key: number }[] // list of [image-id,key] (key is score,date,etc) - sorted by the key (descending)
-
-type History<T> = {
-  past: T[];
-  cur: number;
-}
-function history_create(): History<CompiledSearchQuery> {
-  return {
-    past: [{ query: '', normalized: [], hashKey: '' }],
-    cur: 0
-  };
-};
-function history_push<T>(h: History<T>, s: T): History<T> {
-  return {
-    past: [...h.past, s],
-    cur: h.past.length
-  }
-}
-function history_deleteCur<T>(h: History<T>): History<T> {
-  if (h.past.length == 0) return h; // can't delete single entry
-  const copy = h.past.slice();
-  copy.splice(h.cur, 1);
-  const newCur = Math.min(copy.length - 1, h.cur);
-  return {
-    past: copy,
-    cur: newCur
-  }
-}
-function history_current<T>(h: History<T>): T {
-  return h.past[h.cur];
-}
-function history_forward<T>(h: History<T>): History<T> {
-  return {
-    past: h.past,
-    cur: Math.min(h.cur + 1, h.past.length - 1)
-  }
-}
-function history_back<T>(h: History<T>): History<T> {
-  return {
-    past: h.past,
-    cur: Math.max(h.cur - 1, 0)
-  }
-}
-function history_hasNext<T>(h: History<T>): boolean {
-  return h.cur < h.past.length - 1;
-}
-function history_hasPrev<T>(h: History<T>): boolean {
-  return h.cur > 0;
-}
 
 // The role of this component is to fetch data from server, show error/loading/data-display
 export const DataLoader: React.FC = () => {
@@ -132,49 +85,37 @@ const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
   const [search, setSearch] = useState('');
   const debounced = useDebounce(search);
 
-  const [history, setHistory] = useState<History<CompiledSearchQuery>>(history_create)
+  const history = useHistory<CompiledSearchQuery>({ query: '', normalized: [], hashKey: '' });
 
   const searcher = useMemo(() => createSearcher(images), [images]);
 
   useEffect(() => {
     if (debounced) {
       const query = prepareSearchQuery(debounced);
-      setHistory((h) => {
-        if (history_current(h).query != debounced && h.past.at(-1)!.hashKey != query.hashKey) {
-          return history_push(h, query);
-        };
-        return h
-      });
+      if (history.value.query != debounced && history.latest.hashKey != query.hashKey) {
+        history.push(query);
+      }
     }
-  }, [debounced, searcher]);
+  }, [debounced, history]);
 
+  function updateSearchWithHistoryItem(h: CompiledSearchQuery) {
+    setSearch(h.query);
+  }
   function onBack() {
-    setHistory((h) => {
-      const prev = history_back(h);
-      setSearch(history_current(prev).query);
-      return prev;
-    });
+    history.back(updateSearchWithHistoryItem);
   }
 
   function onNext() {
-    setHistory((h) => {
-      const next = history_forward(h);
-      setSearch(history_current(next).query);
-      return next;
-    });
+    history.forward(updateSearchWithHistoryItem);
   }
 
   function onDeleteCur() {
-    setHistory((h) => {
-      const h2 = history_deleteCur(h);
-      setSearch(history_current(h2).query);
-      return h2
-    });
+    history.deleteCur(updateSearchWithHistoryItem);
   }
 
   //todo: can be simpler
   const extractor = useMemo(() => extractImageSet(images), [images])
-  let itemsToShow = extractor(searcher(history_current(history)));
+  let itemsToShow = extractor(searcher(history.value));
 
 
   return (
@@ -187,15 +128,15 @@ const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
 
       Search History:
       <div className="inline-flex rounded-md shadow-sm" role="group">
-        <button type="button" disabled={!history_hasPrev(history)} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+        <button type="button" disabled={!history.hasPrev} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={onBack}>
           <img width="24px" height="24px" src="left-arrow-back-svgrepo-com.svg" alt='back' />
         </button>
-        <button type="button" disabled={!history_hasNext(history)} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+        <button type="button" disabled={!history.hasNext} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={onNext}>
           <img width="24px" height="24px" src="right-arrow-next-svgrepo-com.svg" alt='next' />
         </button>
-        <button type="button" disabled={debounced == search && history_current(history)?.hashKey == ''} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+        <button type="button" disabled={debounced == search && history.value.hashKey != ''} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
           onClick={onDeleteCur}>
           <img width="24px" height="24px" src="red-x-10333.svg" alt='delete' />
         </button>
