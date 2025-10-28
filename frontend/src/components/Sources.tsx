@@ -1,12 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import axios from 'axios';
-import { useDebounce } from '../hooks/use-debounce';
-import { SearchField } from './search-field';
-import { ImageCard } from './image-card';
-import { indexBy, memoizeByKey, prop, takeWhile } from '../utils/stdlib';
-import { CompiledSearchQuery, countWords, prepareSearchQuery } from '../utils/text-handling';
-import { useHistory } from '../hooks/use-history';
-
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useDebounce } from "../hooks/use-debounce";
+import { SearchField } from "./SearchField";
+import { ImageCard } from "./ImageCard";
+import { indexBy, memoizeByKey, prop, takeWhile } from "../utils/stdlib";
+import {
+  CompiledSearchQuery,
+  countWords,
+  prepareSearchQuery,
+} from "../utils/text-handling";
+import { useHistory } from "../hooks/use-history";
+import { buttonBaseStyle, HistoryControls } from "./HistoryControls";
+import { Modal } from "./Modal";
 
 export interface Source {
   id: number;
@@ -18,64 +22,27 @@ export interface Source {
   status: string;
 }
 
-
-// response of fetch of remote resource
-interface RemoteRes<T> {
-  data?: T;
-  error?: string;
-}
-
-type ImageSet = { id: number, key: number }[] // list of [image-id,key] (key is score,date,etc) - sorted by the key (descending)
-
-// The role of this component is to fetch data from server, show error/loading/data-display
-export const DataLoader: React.FC = () => {
-  const [data, setData] = useState<RemoteRes<Source[]>>();
-
-  useEffect(() => {
-    const fetchImages = async () => {
-      try {
-        const { data } = await axios.get('/api/sources');
-        setData({ data })
-      } catch (err) {
-        setData({
-          error: 'Failed to fetch space images'
-        });
-      }
-    };
-
-    fetchImages();
-  }, []);
-
-  if (!data) {
-    return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  } else if (data.error) {
-    return (
-      <div className="text-red-500 text-center p-4">
-        {data.error}
-      </div>
-    );
-  } else if (data.data) {
-    return <Sources images={data.data} />;
-  }
-  return null;
-}
+type ImageSet = { id: number; key: number }[]; // list of [image-id,key] (key is score,date,etc) - sorted by the key (descending)
 
 // Main images display + search bar
-const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
-  const [search, setSearch] = useState('');
+export const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
+  const [search, setSearch] = useState("");
   const debounced = useDebounce(search);
-  const history = useHistory<CompiledSearchQuery>({ query: '', normalized: [], hashKey: '' });
+  const history = useHistory<CompiledSearchQuery>({
+    query: "",
+    normalized: [],
+    hashKey: "",
+  });
   const searcher = useMemo(() => createSearcher(images), [images]);
-  const extractor = useMemo(() => extractImageSet(images), [images]); // this is clunky, can probably be simpler
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const ref = useRef<any>(null);
   ref.current = (debounced: string) => {
     const query = prepareSearchQuery(debounced);
-    if (history.value.query != debounced && history.latest.hashKey != query.hashKey) {
+    if (
+      history.current.query != debounced &&
+      history.latest.hashKey != query.hashKey
+    ) {
       history.push(query);
     }
   };
@@ -86,82 +53,196 @@ const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
     }
   }, [debounced]);
 
-
   // when history.value changes, the search field should reflect it
   useEffect(() => {
-    setSearch(history.value.query);
-  }, [history.value])
-
-  const itemsToShow = debounced ? extractor(searcher(history.value)) : images;
+    setSearch(history.current.query);
+  }, [history.current]);
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-8">NASA Space Images</h1>
+    <>
+      <div className="container mx-auto px-4 py-8">
+        <h1 className="text-3xl font-bold mb-8">NASA Space Images</h1>
 
-      <div className="flex items-center max-w-sm mx-auto">
-        <SearchField search={search} setSearch={(value) => setSearch(value)} />
-      </div>
+        <div className="flex items-end justify-between gap-4 w-full border-b border-gray-200 pb-2">
+          {/* Left: History Controls */}
+          <HistoryControls
+            onBack={history.back}
+            onForward={history.forward}
+            onDelete={history.deleteAt}
+            backDisabled={!history.hasPrev}
+            forwardDisabled={!history.hasNext}
+            deleteDisabled={history.current.hashKey == ""}
+          />
+          <div className="inline-flex rounded-lg shadow-sm border border-gray-200 overflow-hidden w-fit">
+            <button
+              type="button"
+              className={buttonBaseStyle}
+              disabled={history.current.hashKey == ""}
+              onClick={() => setHistoryOpen(true)}
+            >
+              Show history
+            </button>
+          </div>
+          {/* Middle: Search Field */}
+          <div className="flex-grow flex justify-center">
+            <div className="w-full max-w-md">
+              <SearchField
+                search={search}
+                setSearch={(value) => setSearch(value)}
+              />
+            </div>
+          </div>
+        </div>
 
-      Search History:
-      <div className="inline-flex rounded-md shadow-sm" role="group">
-        <button type="button" disabled={!history.hasPrev} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-l-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={history.back}>
-          <img width="24px" height="24px" src="left-arrow-back-svgrepo-com.svg" alt='back' />
-        </button>
-        <button type="button" disabled={!history.hasNext} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={history.forward}>
-          <img width="24px" height="24px" src="right-arrow-next-svgrepo-com.svg" alt='next' />
-        </button>
-        <button type="button" disabled={history.value.hashKey == ''} className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-900 bg-white border border-gray-200 rounded-r-lg hover:bg-gray-100 hover:text-blue-700 focus:z-10 focus:ring-2 focus:ring-blue-700 focus:text-blue-700 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:hover:text-white dark:hover:bg-gray-600 dark:focus:ring-blue-500 dark:focus:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-          onClick={history.deleteCur}>
-          <img width="24px" height="24px" src="red-x-10333.svg" alt='delete' />
-        </button>
+        {/* Main: image gallery */}
+        <ImageGallery
+          images={images}
+          chosenSet={debounced ? searcher(history.current) : undefined}
+        />
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {itemsToShow.map((image) => image && <ImageCard key={image.id} image={image} />)}
-      </div>
-    </div>
+      {historyOpen && (
+        <HistoryModal
+          history={history.all}
+          onClose={() => setHistoryOpen(false)}
+          onDelete={history.deleteAt}
+        />
+      )}
+    </>
   );
 };
+
+const ImageGallery = React.memo(
+  ({ images, chosenSet }: { images: Source[]; chosenSet?: ImageSet }) => {
+    if (!chosenSet) {
+      return (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {images.map(
+            (image) => image && <ImageCard key={image.id} image={image} />,
+          )}
+        </div>
+      );
+    }
+    const indexById = indexBy("id" as const, images);
+
+    return (
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {chosenSet.map(({ id, key }) => {
+          const image = indexById.get(id)!;
+          return <ImageCard key={id} image={image} score={key} />;
+        })}
+      </div>
+    );
+  },
+);
 
 // Prepares a search function over the images dataset
 // the search function takes CompiledSearchQuery, returns ImageSet
 const createSearcher = (images: Source[]) =>
-  memoizeByKey(prop('hashKey'),
-    (({ normalized }: CompiledSearchQuery) => {
-      const numWords = normalized.length;
-      if (numWords == 0) {
-        return images.map((image) => ({ id: image.id, key: 1 }));
-      }
-      let results = images.map((image) => ({ id: image.id, key: countWords(image.description, normalized) / numWords }));
-      results.sort((a, b) => b.key - a.key); //sort descending
-      return takeWhile(results, ({ key }) => key == 1); //take only results that include all words
-      // can also take images that include any search work, with key>0
+  memoizeByKey(prop("hashKey"), ({ normalized }: CompiledSearchQuery) => {
+    const numWords = normalized.length;
+    if (numWords == 0) {
+      return images.map((image) => ({ id: image.id, key: 1 }));
+    }
+    let results = images.map((image) => ({
+      id: image.id,
+      key: countWords(image.description, normalized) / numWords,
     }));
-
-function memoizeByObject<T extends object, R>(fn: (arg: T) => R) {
-  let cache = new Map<T, R>();
-  return (arg: T): R => {
-    if (cache.has(arg))
-      return cache.get(arg)!;
-    const value = fn(arg)
-    cache.set(arg, value)
-    return value;
-  }
-}
-
-// this function takes images, and returns a (memoized) function to extract set of images by id.
-// this way we can extract some images, and it's memoized so we can get it again immediately
-const extractImageSet = (images: Source[]) => {
-  const indexById = indexBy('id' as const, images);
-  return memoizeByObject((results: ImageSet) => {
-    return results.reduce((acc, cur) => {
-      const image = indexById.get(cur.id);
-      if (image) {
-        acc.push(image);
-      }
-      return acc;
-    }, [] as Source[])
+    results.sort((a, b) => b.key - a.key); //sort descending
+    return takeWhile(results, ({ key }) => key > 0); //take only results that include all words
+    // can also take images that include any search work, with key>0
   });
+
+
+const paginationButtonStyle = "px-3 py-1 text-sm font-medium rounded-md bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed";
+function HistoryModal({
+  history,
+  onClose,
+  onDelete,
+  maxEntriesInPage = 10,
+}: {
+  history: readonly { query: string }[];
+  onClose: () => void;
+  onDelete: (i: number) => void;
+  maxEntriesInPage?: number;
+}) {
+  const [page, setPage] = useState(0);
+
+  const hasPrev = page > 0;
+  const hasNext = (page + 1) * maxEntriesInPage < history.length;
+
+  const start = page * maxEntriesInPage;
+  const end = Math.min(history.length, start + maxEntriesInPage);
+  const thisPage = history.slice(start, end + 1);
+
+  return (
+    <Modal onClose={onClose}>
+      <button
+        onClick={onClose}
+        className="p-1 text-gray-500 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded absolute top-[10px] right-[20px]"
+      >
+        X
+      </button>
+
+      <div className="flex flex-col ">
+        {/* Header */}
+        <h2 className="text-base font-semibold text-gray-800 truncate text-center">
+          Past searches
+        </h2>
+
+        {/* Body: List */}
+        <div className="flex-1 overflow-y-auto max-h-full divide-y divide-gray-100">
+          {history.length === 0 ? (
+            <div className="p-4 text-sm text-gray-500 text-center">
+              No items found.
+            </div>
+          ) : (
+            thisPage.map((item, i) =>
+              i == 0 ? null : (
+                <div
+                  key={i}
+                  className="flex items-center justify-start px-4 py-2"
+                >
+                  <button
+                    onClick={() => onDelete(i)}
+                    className="inline-flex items-center justify-center rounded-md focus:outline-none focus-visible:ring-2 transition-colors p-2 text-base text-red-600 hover:bg-red-50 focus-visible:ring-red-500 active:bg-red-100"
+                  >
+                    <img src="trash.svg" alt="delete" />
+                  </button>
+
+                  <span className="text-sm text-gray-800 truncate pr-2">
+                    {item.query}
+                  </span>
+                </div>
+              ),
+            )
+          )}
+        </div>
+
+        {/* Footer: Pagination */}
+        {(hasNext || hasPrev) && (
+          <div className="flex items-center justify-end border-t border-gray-200 px-4 py-2 gap-1">
+            <span className="flex-1">
+              Showing {start + 1}-{end} out of {history.length}
+            </span>
+
+            <button
+              onClick={() => setPage((i) => i - 1)}
+              disabled={!hasPrev}
+              className={paginationButtonStyle}
+            >
+              Previous {maxEntriesInPage}
+            </button>
+
+            <button
+              onClick={() => setPage((i) => i + 1)}
+              disabled={!hasNext}
+              className={paginationButtonStyle}
+            >
+              Next {maxEntriesInPage}
+            </button>
+          </div>
+        )}
+      </div>
+    </Modal>
+  );
 }
