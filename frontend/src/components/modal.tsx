@@ -35,7 +35,7 @@ export function Modal({
 			}}
 		>
 			<div
-				className="relative bg-white rounded-2xl shadow-lg p-6 w-full max-w-md max-h-[80vh] overflow-auto shadow-lg"
+				className="relative bg-white rounded-2xl shadow-lg p-6 w-full max-w-xl max-h-[80vh] overflow-auto shadow-lg"
 				onClick={(e) => e.stopPropagation()}
 			>
 				{children}

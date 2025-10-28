@@ -40,8 +40,8 @@ export const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
   ref.current = (debounced: string) => {
     const query = prepareSearchQuery(debounced);
     if (
-      history.current.query != debounced &&
-      history.latest.hashKey != query.hashKey
+      history.current?.query != debounced &&
+      history.latest?.hashKey != query.hashKey
     ) {
       history.push(query);
     }
@@ -55,9 +55,9 @@ export const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
 
   // when history.value changes, the search field should reflect it
   useEffect(() => {
-    setSearch(history.current.query);
+    setSearch(history.current?.query ?? "");
   }, [history.current]);
-
+  console.log(history.current)
   return (
     <>
       <div className="container mx-auto px-4 py-8">
@@ -71,13 +71,13 @@ export const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
             onDelete={history.deleteAt}
             backDisabled={!history.hasPrev}
             forwardDisabled={!history.hasNext}
-            deleteDisabled={history.current.hashKey == ""}
+            deleteDisabled={!history.current || history.current.hashKey == ""}
           />
           <div className="inline-flex rounded-lg shadow-sm border border-gray-200 overflow-hidden w-fit">
             <button
               type="button"
               className={buttonBaseStyle}
-              disabled={history.current.hashKey == ""}
+              disabled={history.all.length == 1}
               onClick={() => setHistoryOpen(true)}
             >
               Show history
@@ -97,7 +97,7 @@ export const Sources: React.FC<{ images: Source[] }> = ({ images }) => {
         {/* Main: image gallery */}
         <ImageGallery
           images={images}
-          chosenSet={debounced ? searcher(history.current) : undefined}
+          chosenSet={history.current ? searcher(history.current) : undefined}
         />
       </div>
       {historyOpen && (
@@ -183,7 +183,7 @@ function HistoryModal({
         X
       </button>
 
-      <div className="flex flex-col ">
+      <div className="flex flex-col  w-full ">
         {/* Header */}
         <h2 className="text-base font-semibold text-gray-800 truncate text-center">
           Past searches
@@ -222,7 +222,7 @@ function HistoryModal({
         {(hasNext || hasPrev) && (
           <div className="flex items-center justify-end border-t border-gray-200 px-4 py-2 gap-1">
             <span className="flex-1">
-              Showing {start + 1}-{end} out of {history.length}
+              Showing {start + 1}-{end} out of {history.length - 1}
             </span>
 
             <button
@@ -230,7 +230,7 @@ function HistoryModal({
               disabled={!hasPrev}
               className={paginationButtonStyle}
             >
-              Previous {maxEntriesInPage}
+              Previous page
             </button>
 
             <button
@@ -238,7 +238,7 @@ function HistoryModal({
               disabled={!hasNext}
               className={paginationButtonStyle}
             >
-              Next {maxEntriesInPage}
+              Next page
             </button>
           </div>
         )}

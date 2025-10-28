@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useMemo, useState } from "react";
 
 type History<T> = {
 	past: T[];
@@ -11,37 +11,39 @@ export function useHistory<T>(initial: T) {
 		cur: 0,
 	});
 
-	const push = useCallback((value: T) => {
-		setHistory((h) => ({
-			past: [...h.past, value],
-			cur: h.past.length,
-		}));
-	}, []);
+	const actions = useMemo(() => ({
+		push: (value: T) => {
+			setHistory((h) => ({
+				past: [...h.past, value],
+				cur: h.past.length,
+			}));
+		},
 
-	const deleteAt = useCallback((i?: number) => {
-		setHistory((h) => {
-			if (h.past.length === 0) return h;
-			const newPast = h.past.slice();
-			i ??= h.cur;
-			newPast.splice(i, 1);
-			const newCur = Math.min(newPast.length - 1, h.cur);
-			return { past: newPast, cur: newCur };
-		});
-	}, []);
+		deleteAt: (i?: number) => {
+			setHistory((h) => {
+				if (h.past.length === 0 || i == 0) return h;
+				const newPast = h.past.slice();
+				i ??= h.cur;
+				newPast.splice(i, 1);
+				const newCur = Math.min(newPast.length - 1, h.cur);
+				return { past: newPast, cur: newCur };
+			});
+		},
 
-	const back = useCallback(() => {
-		setHistory((h) => ({
-			past: h.past,
-			cur: Math.max(h.cur - 1, 0),
-		}));
-	}, []);
+		back: () => {
+			setHistory((h) => ({
+				past: h.past,
+				cur: Math.max(h.cur - 1, 0),
+			}));
+		},
 
-	const forward = useCallback(() => {
-		setHistory((h) => ({
-			past: h.past,
-			cur: Math.min(h.cur + 1, h.past.length - 1),
-		}));
-	}, []);
+		forward: () => {
+			setHistory((h) => ({
+				past: h.past,
+				cur: Math.min(h.cur + 1, h.past.length - 1),
+			}));
+		},
+	}), []);
 
 	const hasPrev = history.cur > 0;
 	const hasNext = history.cur < history.past.length - 1;
@@ -51,10 +53,7 @@ export function useHistory<T>(initial: T) {
 		current,
 		latest: history.past.at(-1)!,
 		all: history.past as ReadonlyArray<T>,
-		push,
-		deleteAt,
-		back,
-		forward,
+		...actions,
 		hasPrev,
 		hasNext,
 		history,
