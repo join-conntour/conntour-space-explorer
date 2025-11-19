@@ -52,4 +52,7 @@ yarn-error.log*
 /frontend/build/
 *.pyc
 .coverage
-htmlcov/ 
+htmlcov/
+
+# Data files
+backend/data/search_history.json

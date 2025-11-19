@@ -1,3 +1,241 @@
 @tailwind base;
 @tailwind components;
-@tailwind utilities; 
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply antialiased;
+  }
+  
+  body {
+    @apply text-gray-100;
+    background: #000000;
+  }
+}
+
+@layer utilities {
+  /* Smooth scrolling */
+  html {
+    scroll-behavior: smooth;
+  }
+  
+  /* Starfield Background */
+  .starfield {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    background: radial-gradient(ellipse at bottom, #1b2735 0%, #090a0f 100%);
+    overflow: hidden;
+  }
+
+  .stars {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .stars::before,
+  .stars::after {
+    content: '';
+    position: absolute;
+    width: 2px;
+    height: 2px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 
+      200px 300px white,
+      400px 100px white,
+      600px 500px white,
+      800px 200px white,
+      1000px 400px white,
+      1200px 150px white,
+      1400px 350px white,
+      1600px 250px white,
+      1800px 450px white,
+      200px 600px white,
+      400px 700px white,
+      600px 800px white,
+      800px 900px white,
+      1000px 1000px white,
+      1200px 1100px white,
+      1400px 1200px white,
+      1600px 1300px white,
+      1800px 1400px white,
+      200px 1500px white,
+      400px 1600px white,
+      600px 1700px white,
+      800px 1800px white,
+      1000px 1900px white,
+      1200px 2000px white,
+      1400px 2100px white,
+      1600px 2200px white,
+      1800px 2300px white,
+      300px 200px white,
+      500px 400px white,
+      700px 600px white,
+      900px 800px white,
+      1100px 1000px white,
+      1300px 1200px white,
+      1500px 1400px white,
+      1700px 1600px white,
+      1900px 1800px white,
+      250px 350px white,
+      450px 550px white,
+      650px 750px white,
+      850px 950px white,
+      1050px 1150px white,
+      1250px 1350px white,
+      1450px 1550px white,
+      1650px 1750px white,
+      1850px 1950px white;
+    animation: twinkle 3s infinite;
+  }
+
+  .stars::after {
+    width: 1px;
+    height: 1px;
+    box-shadow: 
+      150px 250px white,
+      350px 50px white,
+      550px 450px white,
+      750px 150px white,
+      950px 350px white,
+      1150px 100px white,
+      1350px 300px white,
+      1550px 200px white,
+      1750px 400px white,
+      150px 550px white,
+      350px 650px white,
+      550px 750px white,
+      750px 850px white,
+      950px 950px white,
+      1150px 1050px white,
+      1350px 1150px white,
+      1550px 1250px white,
+      1750px 1350px white,
+      150px 1450px white,
+      350px 1550px white,
+      550px 1650px white,
+      750px 1750px white,
+      950px 1850px white,
+      1150px 1950px white,
+      1350px 2050px white,
+      1550px 2150px white,
+      1750px 2250px white,
+      250px 150px white,
+      450px 350px white,
+      650px 550px white,
+      850px 750px white,
+      1050px 950px white,
+      1250px 1150px white,
+      1450px 1350px white,
+      1650px 1550px white,
+      1850px 1750px white,
+      200px 300px white,
+      400px 500px white,
+      600px 700px white,
+      800px 900px white,
+      1000px 1100px white,
+      1200px 1300px white,
+      1400px 1500px white,
+      1600px 1700px white,
+      1800px 1900px white;
+    animation: twinkle 5s infinite;
+  }
+
+  @keyframes twinkle {
+    0%, 100% {
+      opacity: 0.3;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  /* Additional layer of smaller stars */
+  .stars-small {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .stars-small::before {
+    content: '';
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 
+      100px 150px white,
+      300px 50px white,
+      500px 250px white,
+      700px 150px white,
+      900px 300px white,
+      1100px 100px white,
+      1300px 200px white,
+      1500px 350px white,
+      1700px 150px white,
+      100px 450px white,
+      300px 550px white,
+      500px 650px white,
+      700px 750px white,
+      900px 850px white,
+      1100px 950px white,
+      1300px 1050px white,
+      1500px 1150px white,
+      1700px 1250px white,
+      100px 1350px white,
+      300px 1450px white,
+      500px 1550px white,
+      700px 1650px white,
+      900px 1750px white,
+      1100px 1850px white,
+      1300px 1950px white,
+      1500px 2050px white,
+      1700px 2150px white,
+      200px 100px white,
+      400px 200px white,
+      600px 400px white,
+      800px 500px white,
+      1000px 600px white,
+      1200px 700px white,
+      1400px 800px white,
+      1600px 900px white,
+      1800px 1000px white;
+    animation: twinkle 7s infinite;
+    opacity: 0.5;
+  }
+  
+  /* Custom scrollbar styling for dark theme */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-gray-900 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gradient-to-b from-purple-600 via-blue-600 to-indigo-600 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply from-purple-500 via-blue-500 to-indigo-500;
+  }
+  
+  /* MUI DatePicker z-index fix */
+  .MuiPopper-root {
+    z-index: 9999 !important;
+  }
+  
+  .MuiPickersPopper-root {
+    z-index: 9999 !important;
+  }
+} 
