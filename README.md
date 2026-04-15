@@ -226,6 +226,41 @@ docker compose exec db psql -U postgres -d space_explorer
 ---
 
 
+## Cool Feature: "Discover Similar" — Related Images Recommendation Drawer
+
+### Feature name
+**Discover Similar** — a slide-in drawer that surfaces the most thematically related NASA images for any selected image.
+
+### Why this feature
+When browsing or searching a large image catalog, users often discover interesting images by accident and want to explore related content — but have no natural path to do so. A "more like this" pattern solves the exploration dead-end: instead of returning to the grid and manually reformulating queries, users can click one button and immediately see the 5 most similar images with visual similarity indicators.
+
+### Implementation details
+
+**Backend — `GET /api/sources/{id}/related?limit=5`**
+
+The endpoint constructs a _pseudo-query_ from the source's own metadata (`name + keywords + description[:200]`) and runs it through the same weighted keyword-overlap scoring engine used for natural language search. Other sources are ranked by similarity score and the top N are returned.
+
+The scoring algorithm (`backend/services/scoring.py`) tokenizes text fields, removes stopwords, then computes a per-field overlap ratio (`|query_tokens ∩ field_tokens| / |query_tokens|`). Weights are: title 0.40, keywords 0.35, description 0.25. These weights reflect the signal quality of each field — curated titles carry more meaning per token than free-form description text.
+
+Using the same scoring engine for both search and related-image similarity meant no duplicate logic and a single surface for tuning quality.
+
+**Frontend — `RelatedDrawer.tsx`**
+
+A fixed right-side panel with CSS `transform: translateX` animation driven by `isOpen` state. The `useRelated` hook only fires when `sourceId` changes (not on every open/close), so re-opening the same card doesn't re-fetch. Each related item includes a proportional fill bar (`div` width = `similarity * 100%`) giving instant visual weight to the scores without requiring a chart library.
+
+**Key challenges:**
+- Route ordering: `POST /sources/search` must be declared before `GET /sources/{id}` in FastAPI to prevent the string literal `"search"` from being captured as an integer path parameter.
+- Tailwind JIT: drawer animation classes (`translate-x-0`, `translate-x-full`) must appear as literal strings in the JSX rather than being dynamically interpolated, so the content scanner includes them in the CSS bundle.
+- Keyword normalization: the mock data uses inconsistent keyword formats (proper arrays vs. comma-delimited strings in a single array element). The seeding script normalizes both forms to a flat comma-separated lowercase string before storage.
+
+### Demo
+
+> _Screenshots/GIFs to be added after running the app locally._
+>
+> To try it: `docker compose -f docker-compose.dev.yml up --build`, then visit http://localhost:3001/browse and click **Discover Similar** on any image card.
+
+---
+
 ## Deliverables
 
 - A GitHub repository with your implementation (fork this one if you'd like)

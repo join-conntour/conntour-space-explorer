@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from controllers import source_router
+from controllers import history_router, source_router
 from db import Base, engine
 
 
@@ -31,3 +31,4 @@ app.add_middleware(
 )
 
 app.include_router(source_router)
+app.include_router(history_router)

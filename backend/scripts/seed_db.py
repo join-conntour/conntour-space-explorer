@@ -12,13 +12,21 @@ import sys
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from db.models import Base, SourceModel
+from db.models import Base, SearchHistoryModel, SourceModel  # noqa: F401 – SearchHistoryModel needed for Base.metadata
 from db.session import engine, AsyncSessionLocal
+
+
+def normalize_keywords(raw: list) -> str:
+    """Flatten and normalize keywords list to a comma-separated lowercase string."""
+    tokens = []
+    for kw in raw:
+        tokens.extend(p.strip().lower() for p in kw.split(",") if p.strip())
+    return ",".join(tokens)
 
 
 async def seed_database():
     """Seed the database with data from mock_data.json."""
-    
+
     # Drop and recreate tables for clean schema
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -57,6 +65,7 @@ async def seed_database():
             description=data.get("description", ""),
             image_url=image_url,
             status="Active",
+            keywords=normalize_keywords(data.get("keywords", [])),
         ))
     
     # Insert data
