@@ -53,26 +53,16 @@ space-explorer/
 ├── backend/                  # FastAPI backend
 │   ├── app.py                # App setup, middleware, router registration
 │   ├── models.py             # Pydantic domain models
-│   ├── pyproject.toml        # Python dependencies (uv)
-│   ├── Dockerfile            # Backend Docker image
-│   ├── controllers/          # HTTP routing layer
-│   │   └── source.py         # Source routes (APIRouter)
-│   ├── db/                   # Database layer
-│   │   ├── models.py         # SQLAlchemy ORM models
-│   │   └── session.py        # Database session management
+│   ├── services/             # Tag extraction + confidence scoring
+│   ├── controllers/          # HTTP routing layer (sources, search, history, admin)
+│   ├── db/                   # SQLAlchemy models + session
 │   ├── repositories/         # Data access layer
-│   │   ├── base.py           # Generic Repository interface
-│   │   └── source.py         # PostgreSQL implementation
-│   ├── scripts/              # Utility scripts
-│   │   └── seed_db.py        # Database seeding from mock data
-│   └── data/                 # Mock data
-│       └── mock_data.json    # NASA images seed data
-├── frontend/                 # React frontend
-│   ├── src/                  # Source files
-│   ├── public/               # Static files
-│   ├── Dockerfile            # Production Docker image
-│   ├── Dockerfile.dev        # Development Docker image
-│   └── nginx.conf            # Nginx configuration
+│   ├── scripts/seed_db.py    # Additive schema + seed
+│   └── data/                 # mock_data.json + object_lexicon.json
+├── frontend/                 # React + TypeScript + shadcn/ui
+│   └── src/                  # Explorer, filters, modal, history, admin
+├── scripts/setup.sh          # One-command local setup
+├── plans/                    # Architecture blueprint
 ├── docker-compose.yml        # Production compose file
 ├── docker-compose.dev.yml    # Development compose file
 └── README.md                 # This file
@@ -89,11 +79,32 @@ space-explorer/
 
 ---
 
-## Quick Start with Docker Compose
+## Quick Start
+
+The fastest way to run the app locally is the one-command setup script:
+
+```bash
+./scripts/setup.sh
+```
+
+This will:
+- Start Docker Desktop on macOS when needed
+- Build and start the development Docker Compose stack
+- Wait until Postgres, the API (`http://localhost:5001`), and the frontend (`http://localhost:3001`) are healthy
+- Apply the additive database seed (metadata, keywords, object tags)
+- Install frontend dependencies into the container volume when needed
+
+Useful flags:
+- `--no-build` skip image rebuilds
+- `--install` force `npm install` in the frontend container
+- `--reset` destroy containers and the Postgres volume, then rebuild
+
+Once the script finishes:
+- App: http://localhost:3001
+- API docs: http://localhost:5001/docs
+- Admin analytics: http://localhost:3001/admin (token default: `dev-admin-token`)
 
 ### Production Mode
-
-Build and run the entire application with a single command:
 
 ```bash
 docker compose up --build
@@ -108,7 +119,7 @@ The frontend will proxy API requests to the backend automatically.
 
 ### Development Mode (with Hot Reload)
 
-For development with hot-reloading enabled for both frontend and backend:
+If you prefer Compose directly instead of `./scripts/setup.sh`:
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build
@@ -226,14 +237,56 @@ docker compose exec db psql -U postgres -d space_explorer
 ---
 
 
+## Cool Feature: Dynamic Classification & Semantic Tag Filtering
+
+1. **Feature name**  
+   Dynamic Classification & Semantic Tag Filtering System, plus an Admin Analytics dashboard.
+
+2. **Why this feature**  
+   Free-text NASA captions mention concrete objects (`rover`, `astronaut`, `launch pad`) and centers (`JPL`, `KSC`), but the original seed path dropped that structure. Users needed a way to combine natural-language search with precise multi-select filters over classifications, keywords, NASA centers, and capture dates, then revisit those searches later.
+
+3. **Implementation details**
+   - Object tags are extracted deterministically from title/description/keywords against a frozen lexicon in `backend/data/object_lexicon.json`. Appearance tags (`man`, `women`, `smile`, `blue shirt`, …) are **visual-only**: curated in `backend/data/visual_annotations.json` after looking at the photo, never inferred from captions (so a helicopter rescue caption that mentions a women-in-aerospace forum does not get tagged `women`).
+   - PostgreSQL stores `keywords` and `object_tags` as `TEXT[]` with GIN indexes; browse filters use containment (`@>`), and search scores combine object-tag membership, keyword hits, and description proximity (with synonym expansion such as `men`↔`man`, `smile`↔`smiling`).
+   - Search history stores query + filters + a result snapshot so reopen is instant and independent of score recomputation.
+   - View counts are incremented through `POST /api/sources/{id}/view` with an `X-View-Key` guard for React Strict Mode.
+   - Admin analytics (`GET /api/admin/analytics`) is gated by `X-Admin-Token` / `ADMIN_TOKEN` and surfaces top keywords, most-viewed images, usage totals, and newly introduced classifications.
+   - Image ingest is idempotent: `Idempotency-Key` + Postgres ledger + `nasa_id` upsert. Novel operator tags are persisted into `dynamic_object_tags.json` and appear under Filters after save. Default bus is local HTTP; optional Kafka/Redpanda profile (`--profile kafka`) shares the same apply path for high-scale workers.
+   - Full blueprint: [`plans/search-images-architecture.md`](plans/search-images-architecture.md).
+
+### Features implemented
+
+| Area | What shipped |
+| --- | --- |
+| Browse | Infinite-scroll gallery (page size 20), Most Recent / Most Viewed / Highest Confidence sorts |
+| Natural-language search | Lexicon-activated pills, confidence badges, AND constraints for multi-phrase visual queries (`men with blue shirt`) |
+| Visual classification | Curated appearance tags for people/clothing/smile; caption-safe `VISUAL_ONLY_TAGS` |
+| Filters | Centers, keywords, object tags, date range; clear-search drops search-activated tags without stranding leftover facets |
+| Search history | Paginated sidebar, restore snapshot, delete one / clear all (AlertDialog) |
+| Image details | Immersive modal with overview, classifications, record metadata, live view count |
+| Add image | Same classify pipeline as seed, appearance quick-picks, novel-tag candidates → Filters, idempotent ingest |
+| Admin | Token-gated analytics for usage, top keywords, top viewed, new classifications |
+| Quality | Backend unit tests (tags, scoring, idempotency), frontend unit tests + production build, Playwright e2e locally against the live stack; GitHub Actions CI for unit/build stages |
+
+### Demo
+
+[Watch the demo](demo.mp4)
+
+### If we had more time
+
+- **Better classification** — vision-assisted suggestions (still human-confirmed for appearance tags), richer clothing/color lexicon, bulk re-audit UI for `visual_annotations.json`.
+- **Astro-Bookmarks / Space Collections** — named folders with notes and many-to-many membership (`collections` + `collection_sources`), “Save to collection” in the modal.
+- **Voyage Timeline** — year (and Mars Sol) density chart under the header; click a bucket to set the date filter.
+- **Ingest at scale** — turn on the Kafka profile by default in staging, dead-letter queue, operator replay UI for failed idempotency keys.
+- **Search UX** — saved filter presets, shareable query URLs, “why this matched” breakdown next to confidence.
+- **Coverage** — broader Playwright paths for Filters + Add image novel tags; visual regression on the modal.
+
 ## Deliverables
 
 - A GitHub repository with your implementation (fork this one if you'd like)
-- Document your **Cool Feature** in the README:
-  1. **Feature name**: What did you build?
-  2. **Why this feature**: What problem does it solve for users?
-  3. **Implementation details**: Key technical decisions and challenges
-  4. **Demo**: Screenshots or GIFs showing it in action
+- The **Cool Feature** documentation above
+- Architecture plan in `plans/search-images-architecture.md`
+- Demo recording at the repo root (`demo.mp4`)
 
 ## Use Your Own Stack (Optional)
 If you prefer, you are **not required** to fork or use this repository. You may build your own stack—language, framework, and tooling of your choice—so long as you meet the [requirements](#requirements) above.

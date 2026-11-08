@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "feat/**"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-unit:
+    name: Backend unit
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync --group dev
+      - name: Ruff
+        run: uv run ruff check .
+      - name: Unit tests
+        run: >
+          uv run pytest -q
+          tests/test_tag_extractor.py
+          tests/test_search_score.py
+          tests/test_ingest_idempotency.py
+
+  frontend-unit:
+    name: Frontend unit + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Unit tests
+        run: CI=true npm test -- --watchAll=false --testPathPattern=searchState
+      - name: Production build
+        run: CI=false npm run build

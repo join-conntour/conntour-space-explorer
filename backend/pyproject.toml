@@ -19,6 +19,9 @@ dev = [
     "httpx>=0.26.0",
     "ruff>=0.1.0",
 ]
+kafka = [
+    "aiokafka>=0.10.0",
+]
 
 [dependency-groups]
 dev = [

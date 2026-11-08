@@ -28,12 +28,61 @@ services:
       - PYTHONDONTWRITEBYTECODE=1
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/space_explorer
+      - ADMIN_TOKEN=${ADMIN_TOKEN:-dev-admin-token}
+      - INGEST_BUS=${INGEST_BUS:-local}
+      - INGEST_BUS_SYNC_FALLBACK=${INGEST_BUS_SYNC_FALLBACK:-1}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-redpanda:9092}
+      - KAFKA_INGEST_TOPIC=${KAFKA_INGEST_TOPIC:-sources.ingest.v1}
     depends_on:
       db:
         condition: service_healthy
     command: >
       sh -c "uv run python scripts/seed_db.py && 
              uv run uvicorn app:app --host 0.0.0.0 --port 5001 --reload"
+
+  redpanda:
+    profiles: ["kafka"]
+    image: redpandadata/redpanda:v24.2.4
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - INTERNAL://0.0.0.0:9092,EXTERNAL://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - INTERNAL://redpanda:9092,EXTERNAL://localhost:19092
+    ports:
+      - "19092:19092"
+
+  ingest-worker:
+    profiles: ["kafka"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
+      - /app/.venv
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/space_explorer
+      - KAFKA_BOOTSTRAP_SERVERS=redpanda:9092
+      - KAFKA_INGEST_TOPIC=sources.ingest.v1
+      - INGEST_BUS=kafka
+    depends_on:
+      db:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+    command: >
+      sh -c "uv sync --extra kafka && uv run python scripts/ingest_worker.py"
 
   frontend:
     build:

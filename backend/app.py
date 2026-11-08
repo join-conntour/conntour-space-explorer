@@ -3,8 +3,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from controllers import source_router
+from controllers import (
+    admin_router,
+    facets_router,
+    history_router,
+    search_router,
+    source_router,
+)
 from db import Base, engine
+from db import models as _db_models  # noqa: F401  — register ORM tables on Base.metadata
 
 
 @asynccontextmanager
@@ -17,8 +24,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Space Explorer API",
-    description="API for browsing NASA images",
-    version="0.1.0",
+    description="API for browsing and searching NASA images",
+    version="0.2.0",
     lifespan=lifespan,
 )
 
@@ -31,3 +38,7 @@ app.add_middleware(
 )
 
 app.include_router(source_router)
+app.include_router(facets_router)
+app.include_router(search_router)
+app.include_router(history_router)
+app.include_router(admin_router)
